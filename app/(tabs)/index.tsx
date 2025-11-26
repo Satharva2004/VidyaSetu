@@ -1,98 +1,246 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import { SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
+import { OnboardingPalette } from '@/constants/onboarding';
+
+const quickActions = [
+  {
+    id: 'ask',
+    title: 'Ask Questions',
+    description: 'Speak your doubts',
+    icon: 'mic-outline',
+  },
+  {
+    id: 'solve',
+    title: 'Solve Math',
+    description: 'Draw & solve problems',
+    icon: 'pencil-outline',
+  },
+];
+
+const recentActivity = [
+  { id: 'tri', title: 'Trigonometry Basics', meta: 'Today' },
+  { id: 'newton', title: `Newton's Laws`, meta: 'Yesterday' },
+];
+
+const stats = [
+  { id: 'questions', value: '12', label: 'Questions asked today' },
+  { id: 'problems', value: '5', label: 'Problems solved' },
+  { id: 'streak', value: '21', label: 'Study streak' },
+];
 
 export default function HomeScreen() {
   return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
+    <SafeAreaView style={styles.safeArea}>
+      <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+        <View style={styles.appBar}>
+          <Ionicons name="leaf-outline" size={20} color={OnboardingPalette.accent} />
+          <Text style={styles.appBarTitle}>Offline AI</Text>
+          <View style={styles.appBarActions}>
+            <Ionicons name="notifications-outline" size={20} color={OnboardingPalette.textPrimary} />
+            <Ionicons name="settings-outline" size={20} color={OnboardingPalette.textPrimary} />
+          </View>
+        </View>
 
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+        <View style={styles.heroCard}>
+          <View>
+            <Text style={styles.heroGreeting}>Hello, Student!</Text>
+            <Text style={styles.heroSubtext}>Monday, 23 Oct</Text>
+          </View>
+          <View style={styles.statusPill}>
+            <View style={styles.statusDot} />
+            <Text style={styles.statusLabel}>All systems ready</Text>
+          </View>
+        </View>
+
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Quick actions</Text>
+        </View>
+        <View style={styles.quickGrid}>
+          {quickActions.map((action) => (
+            <View key={action.id} style={styles.quickCard}>
+              <View style={styles.quickIconWrapper}>
+                <Ionicons name={action.icon as keyof typeof Ionicons.glyphMap} size={20} color={OnboardingPalette.background} />
+              </View>
+              <Text style={styles.quickTitle}>{action.title}</Text>
+              <Text style={styles.quickDescription}>{action.description}</Text>
+            </View>
+          ))}
+        </View>
+
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Recent Activity</Text>
+        </View>
+        <View style={styles.activityGrid}>
+          {recentActivity.map((item) => (
+            <View key={item.id} style={styles.activityCard}>
+              <Text style={styles.activityTitle}>{item.title}</Text>
+              <Text style={styles.activityMeta}>{item.meta}</Text>
+            </View>
+          ))}
+        </View>
+      </ScrollView>
+
+      <View style={styles.statRow}>
+        {stats.map((stat) => (
+          <View key={stat.id} style={styles.statCard}>
+            <Text style={styles.statValue}>{stat.value}</Text>
+            <Text style={styles.statLabel}>{stat.label}</Text>
+          </View>
+        ))}
+      </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
+  safeArea: {
+    flex: 1,
+    backgroundColor: OnboardingPalette.background,
+  },
+  container: {
+    padding: 24,
+    gap: 20,
+    paddingBottom: 140,
+  },
+  appBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    justifyContent: 'space-between',
+    paddingVertical: 4,
   },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
+  appBarTitle: {
+    flex: 1,
+    textAlign: 'center',
+    color: OnboardingPalette.textPrimary,
+    fontWeight: '600',
+    fontSize: 16,
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
+  appBarActions: {
+    flexDirection: 'row',
+    gap: 14,
+  },
+  heroCard: {
+    backgroundColor: OnboardingPalette.card,
+    borderRadius: 24,
+    padding: 20,
+    gap: 12,
+    borderWidth: 1,
+    borderColor: OnboardingPalette.outline,
+  },
+  heroGreeting: {
+    color: OnboardingPalette.textPrimary,
+    fontSize: 28,
+    fontWeight: '700',
+  },
+  heroSubtext: {
+    color: OnboardingPalette.textSecondary,
+  },
+  statusPill: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: OnboardingPalette.elevated,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: OnboardingPalette.accent,
+  },
+  statusLabel: {
+    color: OnboardingPalette.textSecondary,
+    fontSize: 12,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  sectionTitle: {
+    color: OnboardingPalette.textPrimary,
+    fontWeight: '700',
+    fontSize: 16,
+  },
+  quickGrid: {
+    flexDirection: 'row',
+    gap: 14,
+  },
+  quickCard: {
+    flex: 1,
+    backgroundColor: OnboardingPalette.surface,
+    borderRadius: 20,
+    padding: 16,
+    gap: 8,
+    borderWidth: 1,
+    borderColor: OnboardingPalette.outline,
+  },
+  quickIconWrapper: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: OnboardingPalette.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  quickTitle: {
+    color: OnboardingPalette.textPrimary,
+    fontWeight: '600',
+    fontSize: 16,
+  },
+  quickDescription: {
+    color: OnboardingPalette.textSecondary,
+    fontSize: 13,
+  },
+  activityGrid: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  activityCard: {
+    flex: 1,
+    backgroundColor: OnboardingPalette.surface,
+    borderRadius: 20,
+    padding: 16,
+    gap: 6,
+    borderWidth: 1,
+    borderColor: OnboardingPalette.outline,
+  },
+  activityTitle: {
+    color: OnboardingPalette.textPrimary,
+    fontWeight: '600',
+    fontSize: 15,
+  },
+  activityMeta: {
+    color: OnboardingPalette.textSecondary,
+    fontSize: 13,
+  },
+  statRow: {
+    flexDirection: 'row',
+    backgroundColor: OnboardingPalette.surface,
+    borderTopLeftRadius: 32,
+    borderTopRightRadius: 32,
+    paddingHorizontal: 24,
+    paddingVertical: 20,
+    justifyContent: 'space-between',
+    gap: 16,
+  },
+  statCard: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 4,
+  },
+  statValue: {
+    color: OnboardingPalette.accent,
+    fontSize: 22,
+    fontWeight: '700',
+  },
+  statLabel: {
+    color: OnboardingPalette.textSecondary,
+    fontSize: 12,
+    textAlign: 'center',
   },
 });
