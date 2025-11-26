@@ -28,7 +28,7 @@ const socialProviders = [
   { key: 'apple', label: 'Sign in with Apple', icon: 'logo-apple' },
 ];
 
-const CLASS_SELECTION_ROUTE = '/onboarding/class-selection' as const;
+const BACKGROUND_ROUTE = '/onboarding/background' as const;
 
 export default function LoginScreen() {
   const [mode, setMode] = useState<Mode>('login');
@@ -91,8 +91,8 @@ export default function LoginScreen() {
         console.log('[auth] signup success', { email: trimmedEmail, userId });
       }
 
-      router.push(CLASS_SELECTION_ROUTE as never);
-      console.log('[auth] navigate', { destination: CLASS_SELECTION_ROUTE });
+      router.push(BACKGROUND_ROUTE as never);
+      console.log('[auth] navigate', { destination: BACKGROUND_ROUTE });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Something went wrong. Please try again.';
       setErrorMessage(message);

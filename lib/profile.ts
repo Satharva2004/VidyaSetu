@@ -23,6 +23,8 @@ export type UpsertOnboardingProgressParams = {
   classId?: string;
   subjects?: string[];
   currentStep?: number;
+  motherTongue?: string;
+  schoolType?: string;
 };
 
 export async function upsertOnboardingProgress({
@@ -30,18 +32,24 @@ export async function upsertOnboardingProgress({
   classId,
   subjects,
   currentStep,
+  motherTongue,
+  schoolType,
 }: UpsertOnboardingProgressParams) {
   console.log('[supabase] upsertOnboardingProgress:start', {
     userId,
     classId,
     subjects,
     currentStep,
+    motherTongue,
+    schoolType,
   });
   const payload: {
     user_id: string;
     class_id?: string;
     subjects?: string[];
     current_step?: number;
+    mother_tongue?: string;
+    school_type?: string;
   } = {
     user_id: userId,
   };
@@ -56,6 +64,14 @@ export async function upsertOnboardingProgress({
 
   if (typeof currentStep !== 'undefined') {
     payload.current_step = currentStep;
+  }
+
+  if (typeof motherTongue !== 'undefined') {
+    payload.mother_tongue = motherTongue;
+  }
+
+  if (typeof schoolType !== 'undefined') {
+    payload.school_type = schoolType;
   }
 
   const { error } = await supabase.from('onboarding_progress').upsert(payload, {
