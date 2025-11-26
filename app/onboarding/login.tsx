@@ -29,6 +29,9 @@ const socialProviders = [
 ];
 
 const BACKGROUND_ROUTE = '/onboarding/background' as const;
+const CLASS_SELECTION_ROUTE = '/onboarding/class-selection' as const;
+const SUBJECT_SELECTION_ROUTE = '/onboarding/subject-selection' as const;
+const HOME_ROUTE = '/(tabs)' as const;
 
 export default function LoginScreen() {
   const [mode, setMode] = useState<Mode>('login');
@@ -63,12 +66,15 @@ export default function LoginScreen() {
       setErrorMessage(null);
       console.log('[auth] handleSubmit:start', { mode, email: trimmedEmail });
 
+      let userId: string | undefined;
+
       if (mode === 'login') {
-        const { error } = await supabase.auth.signInWithPassword({
+        const { data, error } = await supabase.auth.signInWithPassword({
           email: trimmedEmail,
           password: trimmedPassword,
         });
         if (error) throw error;
+        userId = data.user?.id;
         console.log('[auth] login success', { email: trimmedEmail });
       } else {
         const { data, error } = await supabase.auth.signUp({
@@ -82,7 +88,7 @@ export default function LoginScreen() {
         });
         if (error) throw error;
 
-        const userId = data.user?.id;
+        userId = data.user?.id;
         if (!userId) {
           throw new Error('Signup succeeded but user information is missing.');
         }
@@ -91,8 +97,13 @@ export default function LoginScreen() {
         console.log('[auth] signup success', { email: trimmedEmail, userId });
       }
 
-      router.push(BACKGROUND_ROUTE as never);
-      console.log('[auth] navigate', { destination: BACKGROUND_ROUTE });
+      if (!userId) {
+        throw new Error('Unable to load your account. Please try again.');
+      }
+
+      const nextRoute = await resolveNextOnboardingRoute(userId);
+      router.replace(nextRoute as never);
+      console.log('[auth] navigate', { destination: nextRoute });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Something went wrong. Please try again.';
       setErrorMessage(message);
@@ -209,6 +220,33 @@ export default function LoginScreen() {
     </SafeAreaView>
   );
 }
+
+const resolveNextOnboardingRoute = async (userId: string) => {
+  const { data, error } = await supabase
+    .from('onboarding_progress')
+    .select('mother_tongue, school_type, class_id, subjects')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (error && error.code !== 'PGRST116') {
+    console.error('[auth] resolveNextOnboardingRoute:error', error);
+    throw error;
+  }
+
+  if (!data || !data.mother_tongue || !data.school_type) {
+    return BACKGROUND_ROUTE;
+  }
+
+  if (!data.class_id) {
+    return CLASS_SELECTION_ROUTE;
+  }
+
+  if (!data.subjects || (Array.isArray(data.subjects) && data.subjects.length === 0)) {
+    return SUBJECT_SELECTION_ROUTE;
+  }
+
+  return HOME_ROUTE;
+};
 
 const styles = StyleSheet.create({
   safeArea: {

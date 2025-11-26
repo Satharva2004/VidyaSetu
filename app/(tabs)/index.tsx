@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { OnboardingPalette } from '@/constants/onboarding';
+import { OnboardingPalette, subjectOptions } from '@/constants/onboarding';
 import { supabase } from '@/lib/supabase';
 
 const quickActions = [
@@ -37,29 +37,24 @@ const statConfig = [
   { id: 'streak', label: 'Study streak', key: 'streak_days' },
 ] as const;
 
-type HomeActivity = {
+type SelectedSubject = {
   id: string;
   title: string;
-  meta?: string | null;
-  created_at: string;
+  meta: string;
+  icon: string;
 };
 
 export default function HomeScreen() {
   const router = useRouter();
   const [profileName, setProfileName] = useState('Student');
   const [statCards, setStatCards] = useState(() => statConfig.map((item) => ({ ...item, value: '0' })));
-  const [activities, setActivities] = useState<HomeActivity[]>([]);
+  const [selectedSubjects, setSelectedSubjects] = useState<SelectedSubject[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const greetSubtitle = useMemo(() => {
     return new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'short' });
-  }, []);
-
-  const formatActivityMeta = useCallback((activity: HomeActivity) => {
-    if (activity.meta) return activity.meta;
-    return new Date(activity.created_at).toLocaleString('en-IN', { month: 'short', day: 'numeric' });
   }, []);
 
   const fetchHomeData = useCallback(async () => {
@@ -75,19 +70,14 @@ export default function HomeScreen() {
         return;
       }
 
-      const [profileRes, statsRes, activityRes] = await Promise.all([
+      const [profileRes, statsRes, onboardingRes] = await Promise.all([
         supabase.from('user_profiles').select('full_name').eq('id', user.id).maybeSingle(),
         supabase
           .from('home_stats')
           .select('questions_today, problems_solved, streak_days')
           .eq('user_id', user.id)
           .maybeSingle(),
-        supabase
-          .from('home_activity')
-          .select('id,title,meta,created_at')
-          .eq('user_id', user.id)
-          .order('created_at', { ascending: false })
-          .limit(5),
+        supabase.from('onboarding_progress').select('subjects').eq('user_id', user.id).maybeSingle(),
       ]);
 
       if (profileRes.data?.full_name) {
@@ -104,7 +94,21 @@ export default function HomeScreen() {
       }));
       setStatCards(mappedStats);
 
-      setActivities(activityRes.data ?? []);
+      const subjects = (onboardingRes.data?.subjects ?? []) as string[];
+      const mappedSubjects = subjects
+        .map((subjectId) => {
+          const definition = subjectOptions.find((subject) => subject.id === subjectId);
+          if (!definition) return null;
+          return {
+            id: subjectId,
+            title: definition.title,
+            meta: definition.description,
+            icon: definition.icon,
+          } satisfies SelectedSubject;
+        })
+        .filter(Boolean) as SelectedSubject[];
+
+      setSelectedSubjects(mappedSubjects);
     } catch (error) {
       console.error('[home] fetchHomeData', error);
       setErrorMessage(error instanceof Error ? error.message : 'Unable to load home data.');
@@ -156,6 +160,9 @@ export default function HomeScreen() {
           <Text style={styles.appBarTitle}>Offline AI</Text>
           <View style={styles.appBarActions}>
             <TouchableOpacity activeOpacity={0.8}>
+              <Ionicons name="school-outline" size={20} color={OnboardingPalette.textPrimary} />
+            </TouchableOpacity>
+            <TouchableOpacity activeOpacity={0.8}>
               <Ionicons name="notifications-outline" size={20} color={OnboardingPalette.textPrimary} />
             </TouchableOpacity>
             <TouchableOpacity activeOpacity={0.8} onPress={handleLogout}>
@@ -169,17 +176,10 @@ export default function HomeScreen() {
             <Text style={styles.heroGreeting}>Hello, {profileName}!</Text>
             <Text style={styles.heroSubtext}>{greetSubtitle}</Text>
           </View>
-          <View style={styles.statusPill}>
-            <View style={styles.statusDot} />
-            <Text style={styles.statusLabel}>All systems ready</Text>
-          </View>
         </View>
 
         {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
 
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Quick actions</Text>
-        </View>
         <View style={styles.quickGrid}>
           {quickActions.map((action) => (
             <TouchableOpacity key={action.id} style={styles.quickCard} activeOpacity={0.9}>
@@ -193,27 +193,30 @@ export default function HomeScreen() {
         </View>
 
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Recent Activity</Text>
+          <Text style={styles.sectionTitle}>Selected Subjects</Text>
         </View>
         <View style={styles.activityGrid}>
-          {activities.length === 0 && <Text style={styles.activityMeta}>No activity yet. Start learning!</Text>}
-          {activities.map((item) => (
+          {selectedSubjects.length === 0 && <Text style={styles.activityMeta}>No subjects yet. Add one!</Text>}
+          {selectedSubjects.map((item) => (
             <View key={item.id} style={styles.activityCard}>
-              <Text style={styles.activityTitle}>{item.title}</Text>
-              <Text style={styles.activityMeta}>{formatActivityMeta(item)}</Text>
+              <View style={styles.subjectHeader}>
+                <View style={styles.subjectIcon}>
+                  <Ionicons name={item.icon as keyof typeof Ionicons.glyphMap} size={18} color={OnboardingPalette.background} />
+                </View>
+                <Text style={styles.activityTitle}>{item.title}</Text>
+              </View>
+              <Text style={styles.activityMeta}>{item.meta}</Text>
             </View>
           ))}
         </View>
+
+        <TouchableOpacity style={styles.addSubjectButton} activeOpacity={0.9}>
+          <Ionicons name="add-outline" size={20} color={OnboardingPalette.background} />
+          <Text style={styles.addSubjectLabel}>Add Subject</Text>
+        </TouchableOpacity>
       </ScrollView>
 
-      <View style={styles.statRow}>
-        {statCards.map((stat) => (
-          <View key={stat.id} style={styles.statCard}>
-            <Text style={styles.statValue}>{stat.value}</Text>
-            <Text style={styles.statLabel}>{stat.label}</Text>
-          </View>
-        ))}
-      </View>
+      
     </SafeAreaView>
   );
 }
@@ -339,6 +342,19 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: OnboardingPalette.outline,
   },
+  subjectHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  subjectIcon: {
+    height: 36,
+    width: 36,
+    borderRadius: 12,
+    backgroundColor: OnboardingPalette.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   activityTitle: {
     color: OnboardingPalette.textPrimary,
     fontWeight: '600',
@@ -376,5 +392,20 @@ const styles = StyleSheet.create({
   errorText: {
     color: '#ff6b6b',
     textAlign: 'center',
+  },
+  addSubjectButton: {
+    marginTop: 12,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: OnboardingPalette.accent,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  addSubjectLabel: {
+    color: OnboardingPalette.background,
+    fontWeight: '700',
+    fontSize: 16,
   },
 });
