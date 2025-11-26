@@ -1,8 +1,11 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { Audio } from 'expo-av';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as Speech from 'expo-speech';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import {
+  Animated,
+  Easing,
   ScrollView,
   StyleSheet,
   Text,
@@ -63,6 +66,13 @@ export default function SubjectAssistantScreen() {
   const [offlineHistory, setOfflineHistory] = useState<Message[]>(offlineSeedConversation);
   const [onlineHistory, setOnlineHistory] = useState<Message[]>(onlineSeedConversation);
   const [isResponding, setIsResponding] = useState(false);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const micScale = useRef(new Animated.Value(1)).current;
+  const wavePulse = useRef(new Animated.Value(0)).current;
+  const waveLoopRef = useRef<Animated.CompositeAnimation | null>(null);
+  const recordingRef = useRef<Audio.Recording | null>(null);
 
   const subjectDefinition = subjectId ? getSubjectDefinition(subjectId) : null;
 
@@ -121,20 +131,181 @@ export default function SubjectAssistantScreen() {
     setPrompt('');
   }, [prompt, isResponding, offlineMode, subjectDefinition]);
 
-  const handleMicPress = useCallback(() => {
-    const targetHistory = offlineMode ? offlineHistory : onlineHistory;
-    const lastAssistantMessage = [...targetHistory].reverse().find((message) => message.role === 'assistant');
-    const fallback = subjectDefinition
-      ? `${subjectDefinition.title} tutor is listening. Ask your question to begin.`
-      : 'Your tutor is ready. Ask a question to get started.';
-    const utterance = lastAssistantMessage?.text ?? fallback;
+  const animateMic = useCallback(() => {
+    Animated.sequence([
+      Animated.timing(micScale, {
+        toValue: 1.15,
+        duration: 120,
+        easing: Easing.out(Easing.ease),
+        useNativeDriver: true,
+      }),
+      Animated.spring(micScale, {
+        toValue: 1,
+        friction: 3,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [micScale]);
 
-    Speech.stop();
-    Speech.speak(utterance, {
-      rate: offlineMode ? 0.98 : 1.05,
-      pitch: 1,
-    });
-  }, [offlineMode, offlineHistory, onlineHistory, subjectDefinition]);
+  const speakText = useCallback(
+    async (utterance: string, options?: Speech.SpeechOptions) => {
+      setVoiceError(null);
+      try {
+        await Speech.stop();
+        Speech.speak(utterance, {
+          ...options,
+          rate: options?.rate ?? 1,
+          pitch: options?.pitch ?? 1,
+          onStart: () => {
+            console.log('[speech] onStart');
+            options?.onStart?.();
+          },
+          onDone: () => {
+            console.log('[speech] onDone');
+            options?.onDone?.();
+          },
+          onStopped: () => {
+            console.log('[speech] onStopped');
+            options?.onStopped?.();
+          },
+          onError: (event) => {
+            console.error('[speech] onError', event);
+            setVoiceError(typeof event === 'string' ? event : event?.message ?? 'Unable to play audio.');
+            options?.onError?.(event as never);
+          },
+        });
+      } catch (error) {
+        console.error('[speech] exception', error);
+        setVoiceError(error instanceof Error ? error.message : 'Unable to trigger text-to-speech.');
+      }
+    },
+    [],
+  );
+
+  const startWaveAnimation = useCallback(() => {
+    waveLoopRef.current?.stop();
+    waveLoopRef.current = Animated.loop(
+      Animated.sequence([
+        Animated.timing(wavePulse, {
+          toValue: 1,
+          duration: 500,
+          easing: Easing.out(Easing.ease),
+          useNativeDriver: true,
+        }),
+        Animated.timing(wavePulse, {
+          toValue: 0,
+          duration: 500,
+          easing: Easing.in(Easing.ease),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    waveLoopRef.current.start();
+  }, [wavePulse]);
+
+  const stopWaveAnimation = useCallback(() => {
+    waveLoopRef.current?.stop();
+    wavePulse.setValue(0);
+  }, [wavePulse]);
+
+  const startRecording = useCallback(async () => {
+    try {
+      setVoiceError(null);
+      const permission = await Audio.requestPermissionsAsync();
+      if (!permission.granted) {
+        setVoiceError('Microphone permission is required.');
+        return;
+      }
+
+      await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
+      const recording = new Audio.Recording();
+      await recording.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+      await recording.startAsync();
+      recordingRef.current = recording;
+      setIsRecording(true);
+      startWaveAnimation();
+      animateMic();
+    } catch (error) {
+      console.error('[recording] start:error', error);
+      setVoiceError(error instanceof Error ? error.message : 'Unable to start recording.');
+    }
+  }, [animateMic, startWaveAnimation]);
+
+  const stopRecordingAndTranscribe = useCallback(async () => {
+    const recording = recordingRef.current;
+    if (!recording) return;
+
+    try {
+      setIsRecording(false);
+      setIsTranscribing(true);
+      await recording.stopAndUnloadAsync();
+      const uri = recording.getURI();
+      recordingRef.current = null;
+      if (!uri) {
+        throw new Error('No recording data found.');
+      }
+
+      const response = await fetch(uri);
+      const audioBlob = await response.blob();
+
+      const deepgramKey = "b0c3e3948041ea483954cac7a74e755fcdaf98c8";
+      if (!deepgramKey) {
+        throw new Error('Missing Deepgram key. Set EXPO_PUBLIC_DEEPGRAM_KEY in your .env.');
+      }
+
+      const deepgramResponse = await fetch('https://api.deepgram.com/v1/listen', {
+        method: 'POST',
+        headers: {
+          Authorization: `Token ${deepgramKey}`,
+          'Content-Type': 'audio/wav',
+        },
+        body: audioBlob,
+      });
+
+      if (!deepgramResponse.ok) {
+        const errorText = await deepgramResponse.text();
+        throw new Error(`Deepgram error ${deepgramResponse.status}: ${errorText}`);
+      }
+
+      const deepgramJson = await deepgramResponse.json();
+      const transcript =
+        deepgramJson?.results?.channels?.[0]?.alternatives?.[0]?.transcript?.trim() ?? '';
+
+      if (transcript) {
+        setPrompt((prev) => (prev ? `${prev} ${transcript}` : transcript));
+      } else {
+        setVoiceError('No speech detected. Try again.');
+      }
+    } catch (error) {
+      console.error('[recording] stop:error', error);
+      setVoiceError(error instanceof Error ? error.message : 'Unable to transcribe audio.');
+    } finally {
+      stopWaveAnimation();
+      setIsTranscribing(false);
+      recordingRef.current = null;
+    }
+  }, [stopWaveAnimation]);
+
+  const handleMicPress = useCallback(() => {
+    if (isRecording) {
+      stopRecordingAndTranscribe();
+    } else {
+      startRecording();
+    }
+  }, [isRecording, startRecording, stopRecordingAndTranscribe]);
+
+  const handleListen = useCallback(
+    (messageText: string) => {
+      speakText(messageText, { rate: 1, pitch: 1 });
+    },
+    [speakText],
+  );
+
+  const micStatusMessage = isRecording
+    ? 'Listening… tap the mic to finish.'
+    : isTranscribing
+      ? 'Transcribing your question…'
+      : null;
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -174,7 +345,7 @@ export default function SubjectAssistantScreen() {
                 )}
               </View>
               {!isUser && (
-                <TouchableOpacity activeOpacity={0.8} style={styles.listenButton}>
+                <TouchableOpacity activeOpacity={0.8} style={styles.listenButton} onPress={() => handleListen(message.text)}>
                   <Ionicons name="volume-high" size={16} color={OnboardingPalette.textPrimary} />
                   <Text style={styles.listenLabel}>Listen</Text>
                 </TouchableOpacity>
@@ -201,27 +372,53 @@ export default function SubjectAssistantScreen() {
       <Text style={styles.modeHint}>{modeHintText}</Text>
 
       <View style={styles.inputRow}>
-        <TextInput
-          value={prompt}
-          onChangeText={setPrompt}
-          placeholder={inputPlaceholder}
-          placeholderTextColor={OnboardingPalette.textSecondary}
-          style={styles.promptInput}
-          returnKeyType="send"
-          onSubmitEditing={handleSend}
-        />
-        <TouchableOpacity style={styles.micButton} activeOpacity={0.85} onPress={handleMicPress}>
-          <Ionicons name="mic" size={20} color={OnboardingPalette.background} />
-        </TouchableOpacity>
+        {micStatusMessage ? (
+          <View style={styles.statusBanner}>
+            <Ionicons name={isRecording ? 'mic' : 'sync'} size={16} color={OnboardingPalette.textPrimary} />
+            <Text style={styles.statusLabel}>{micStatusMessage}</Text>
+          </View>
+        ) : (
+          <TextInput
+            value={prompt}
+            onChangeText={setPrompt}
+            placeholder={inputPlaceholder}
+            placeholderTextColor={OnboardingPalette.textSecondary}
+            style={styles.promptInput}
+            returnKeyType="send"
+            onSubmitEditing={handleSend}
+          />
+        )}
         <TouchableOpacity
-          style={[styles.sendButton, isSendDisabled && styles.sendButtonDisabled]}
+          style={[styles.sendButton, (isSendDisabled || !!micStatusMessage) && styles.sendButtonDisabled]}
           activeOpacity={0.85}
           onPress={handleSend}
-          disabled={isSendDisabled}>
+          disabled={isSendDisabled || !!micStatusMessage}>
           <Ionicons name="arrow-up" size={18} color={OnboardingPalette.background} />
         </TouchableOpacity>
+        <Animated.View style={[styles.micWrapper, { transform: [{ scale: micScale }] }]}>
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              styles.micWave,
+              {
+                opacity: isRecording
+                  ? wavePulse.interpolate({ inputRange: [0, 1], outputRange: [0.4, 0] })
+                  : 0,
+                transform: [
+                  {
+                    scale: wavePulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.5] }),
+                  },
+                ],
+              },
+            ]}
+          />
+          <TouchableOpacity style={[styles.micButton, isRecording && styles.micButtonActive]} activeOpacity={0.85} onPress={handleMicPress}>
+            <Ionicons name={isRecording ? 'stop' : 'mic'} size={20} color={OnboardingPalette.background} />
+          </TouchableOpacity>
+        </Animated.View>
       </View>
       {isResponding && !offlineMode ? <Text style={styles.typingIndicator}>Vidya AI is formulating an online answer…</Text> : null}
+      {voiceError ? <Text style={styles.speechError}>{voiceError}</Text> : null}
     </SafeAreaView>
   );
 }
@@ -377,13 +574,30 @@ const styles = StyleSheet.create({
     color: OnboardingPalette.textPrimary,
     height: 40,
   },
+  micWrapper: {
+    borderRadius: 28,
+    height: 48,
+    width: 48,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  micWave: {
+    position: 'absolute',
+    height: 48,
+    width: 48,
+    borderRadius: 24,
+    backgroundColor: OnboardingPalette.accent,
+  },
   micButton: {
-    height: 40,
-    width: 40,
-    borderRadius: 20,
+    height: 48,
+    width: 48,
+    borderRadius: 24,
     backgroundColor: OnboardingPalette.accent,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  micButtonActive: {
+    backgroundColor: OnboardingPalette.textPrimary,
   },
   sendButton: {
     height: 40,
@@ -399,6 +613,35 @@ const styles = StyleSheet.create({
   typingIndicator: {
     marginTop: 10,
     color: OnboardingPalette.textSecondary,
+    fontSize: 12,
+    textAlign: 'center',
+  },
+  voiceStatus: {
+    marginTop: 6,
+    color: OnboardingPalette.textSecondary,
+    fontSize: 12,
+    textAlign: 'center',
+  },
+  statusBanner: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderRadius: 999,
+    backgroundColor: OnboardingPalette.surface,
+    borderWidth: 1,
+    borderColor: OnboardingPalette.outline,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  statusLabel: {
+    color: OnboardingPalette.textPrimary,
+    fontSize: 14,
+    flexShrink: 1,
+  },
+  speechError: {
+    marginTop: 4,
+    color: '#ff6b6b',
     fontSize: 12,
     textAlign: 'center',
   },
