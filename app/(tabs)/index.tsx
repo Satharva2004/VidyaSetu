@@ -2,14 +2,14 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    RefreshControl,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -127,6 +127,13 @@ export default function HomeScreen() {
     setRefreshing(false);
   }, [fetchHomeData]);
 
+  const handleOpenSubject = useCallback(
+    (subjectId: string) => {
+      router.push({ pathname: '/subject/[subjectId]', params: { subjectId } } as never);
+    },
+    [router],
+  );
+
   const handleLogout = useCallback(() => {
     Alert.alert('Log out?', 'You can sign back in anytime.', [
       { text: 'Cancel', style: 'cancel' },
@@ -198,7 +205,11 @@ export default function HomeScreen() {
         <View style={styles.activityGrid}>
           {selectedSubjects.length === 0 && <Text style={styles.activityMeta}>No subjects yet. Add one!</Text>}
           {selectedSubjects.map((item) => (
-            <View key={item.id} style={styles.activityCard}>
+            <TouchableOpacity
+              key={item.id}
+              style={styles.activityCard}
+              activeOpacity={0.85}
+              onPress={() => handleOpenSubject(item.id)}>
               <View style={styles.subjectHeader}>
                 <View style={styles.subjectIcon}>
                   <Ionicons name={item.icon as keyof typeof Ionicons.glyphMap} size={18} color={OnboardingPalette.background} />
@@ -206,7 +217,7 @@ export default function HomeScreen() {
                 <Text style={styles.activityTitle}>{item.title}</Text>
               </View>
               <Text style={styles.activityMeta}>{item.meta}</Text>
-            </View>
+            </TouchableOpacity>
           ))}
         </View>
 
