@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { OnboardingPalette, subjectOptions } from '@/constants/onboarding';
+import { OnboardingPalette, getSubjectDefinition } from '@/constants/onboarding';
 import { supabase } from '@/lib/supabase';
 
 const quickActions = [
@@ -97,7 +97,7 @@ export default function HomeScreen() {
       const subjects = (onboardingRes.data?.subjects ?? []) as string[];
       const mappedSubjects = subjects
         .map((subjectId) => {
-          const definition = subjectOptions.find((subject) => subject.id === subjectId);
+          const definition = getSubjectDefinition(subjectId);
           if (!definition) return null;
           return {
             id: subjectId,

@@ -1,17 +1,71 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router } from 'expo-router';
-import { useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
+import { useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { OnboardingPalette, subjectOptions } from '@/constants/onboarding';
+import { OnboardingPalette, SubjectOption, getSubjectsForClass } from '@/constants/onboarding';
 import { getCurrentUserId, upsertOnboardingProgress } from '@/lib/profile';
+import { supabase } from '@/lib/supabase';
 
 export default function SubjectSelectionScreen() {
-  const [selectedSubjects, setSelectedSubjects] = useState<string[]>(['physics']);
+  const [selectedSubjects, setSelectedSubjects] = useState<string[]>([]);
+  const [availableSubjects, setAvailableSubjects] = useState<SubjectOption[]>([]);
   const [remindersEnabled, setRemindersEnabled] = useState(true);
   const [saving, setSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [loadingSubjects, setLoadingSubjects] = useState(true);
+  const [subjectLoadError, setSubjectLoadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const fetchSubjects = async () => {
+      try {
+        setLoadingSubjects(true);
+        setSubjectLoadError(null);
+        const userId = await getCurrentUserId();
+        const { data, error } = await supabase
+          .from('onboarding_progress')
+          .select('class_id, subjects')
+          .eq('user_id', userId)
+          .maybeSingle();
+
+        if (error && error.code !== 'PGRST116') {
+          throw error;
+        }
+
+        const classId = data?.class_id ?? '5';
+        const classSubjects = getSubjectsForClass(classId);
+        if (!isMounted) return;
+
+        setAvailableSubjects(classSubjects);
+        setSelectedSubjects((prev) => {
+          if (data?.subjects?.length) {
+            return data.subjects as string[];
+          }
+
+          const stillValid = prev.filter((id) => classSubjects.some((subject) => subject.id === id));
+          if (stillValid.length) return stillValid;
+          if (classSubjects.length) return [classSubjects[0].id];
+          return [];
+        });
+      } catch (err) {
+        console.error('[onboarding/subject] fetchSubjects:error', err);
+        if (!isMounted) return;
+        setSubjectLoadError('Unable to load subjects. Please try again.');
+      } finally {
+        if (isMounted) {
+          setLoadingSubjects(false);
+        }
+      }
+    };
+
+    fetchSubjects();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const toggleSubject = (id: string) => {
     console.log('[onboarding/subject] toggleSubject', { id });
@@ -22,9 +76,9 @@ export default function SubjectSelectionScreen() {
 
   const summaryText = useMemo(() => {
     if (!selectedSubjects.length) return 'Pick at least one subject to begin.';
-    const highlight = subjectOptions.find((item) => item.id === selectedSubjects[0]);
+    const highlight = availableSubjects.find((item) => item.id === selectedSubjects[0]);
     return `${selectedSubjects.length} selected · ${highlight?.title ?? 'Personalised focus'}`;
-  }, [selectedSubjects]);
+  }, [availableSubjects, selectedSubjects]);
 
   const handleContinue = async () => {
     if (!selectedSubjects.length) {
@@ -87,7 +141,17 @@ export default function SubjectSelectionScreen() {
         </View>
 
         <View style={styles.list}>
-          {subjectOptions.map((subject) => {
+          {loadingSubjects && (
+            <View style={styles.loadingCard}>
+              <ActivityIndicator color={OnboardingPalette.accent} />
+              <Text style={styles.loadingLabel}>Loading subjects…</Text>
+            </View>
+          )}
+          {subjectLoadError && <Text style={styles.errorText}>{subjectLoadError}</Text>}
+          {!loadingSubjects && !availableSubjects.length ? (
+            <Text style={styles.subjectDescription}>No subjects available for your class yet.</Text>
+          ) : null}
+          {availableSubjects.map((subject) => {
             const isActive = selectedSubjects.includes(subject.id);
             return (
               <TouchableOpacity
@@ -208,6 +272,19 @@ const styles = StyleSheet.create({
   },
   list: {
     gap: 12,
+  },
+  loadingCard: {
+    padding: 20,
+    borderRadius: 16,
+    backgroundColor: OnboardingPalette.surface,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    borderWidth: 1,
+    borderColor: OnboardingPalette.outline,
+  },
+  loadingLabel: {
+    color: OnboardingPalette.textPrimary,
   },
   listItem: {
     backgroundColor: OnboardingPalette.surface,
