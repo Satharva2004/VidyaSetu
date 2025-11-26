@@ -1,13 +1,14 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useMemo, useState } from 'react';
+import * as Speech from 'expo-speech';
+import { useCallback, useMemo, useState } from 'react';
 import {
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -19,7 +20,7 @@ type Message = {
   text: string;
 };
 
-const sampleConversation: Message[] = [
+const offlineSeedConversation: Message[] = [
   {
     id: '1',
     role: 'user',
@@ -42,10 +43,26 @@ const sampleConversation: Message[] = [
   },
 ];
 
+const onlineSeedConversation: Message[] = [
+  {
+    id: 'online_intro',
+    role: 'assistant',
+    text: 'Switch to Online Mode to connect with Vidya AI cloud for deeper, up-to-date explanations.',
+  },
+  {
+    id: 'online_tip',
+    role: 'assistant',
+    text: 'Ask multi-step or exam questions here and I will reason through them with internet assistance.',
+  },
+];
+
 export default function SubjectAssistantScreen() {
   const { subjectId } = useLocalSearchParams<{ subjectId?: string }>();
   const [prompt, setPrompt] = useState('');
   const [offlineMode, setOfflineMode] = useState(true);
+  const [offlineHistory, setOfflineHistory] = useState<Message[]>(offlineSeedConversation);
+  const [onlineHistory, setOnlineHistory] = useState<Message[]>(onlineSeedConversation);
+  const [isResponding, setIsResponding] = useState(false);
 
   const subjectDefinition = subjectId ? getSubjectDefinition(subjectId) : null;
 
@@ -53,6 +70,71 @@ export default function SubjectAssistantScreen() {
     if (!subjectDefinition) return 'Subject AI';
     return `${subjectDefinition.title} AI`;
   }, [subjectDefinition]);
+
+  const activeMessages = offlineMode ? offlineHistory : onlineHistory;
+  const modeHintText = offlineMode
+    ? 'Offline packs give you instant answers without data. Switch modes for cloud help when you are connected.'
+    : 'Online mode streams richer explanations with the latest knowledge.';
+  const inputPlaceholder = offlineMode
+    ? 'Ask using the offline pack...'
+    : 'Ask anything (requires internet)...';
+  const isSendDisabled = !prompt.trim() || isResponding;
+
+  const handleModeChange = useCallback((mode: 'offline' | 'online') => {
+    setOfflineMode(mode === 'offline');
+    setPrompt('');
+    setIsResponding(false);
+  }, []);
+
+  const handleSend = useCallback(() => {
+    const trimmed = prompt.trim();
+    if (!trimmed || isResponding) return;
+
+    const newUserMessage: Message = {
+      id: `${Date.now()}`,
+      role: 'user',
+      text: trimmed,
+    };
+
+    if (offlineMode) {
+      const subjectLabel = subjectDefinition?.title ?? 'this subject';
+      const offlineReply: Message = {
+        id: `${Date.now()}-offline-reply`,
+        role: 'assistant',
+        text: `Here is an offline summary for "${trimmed}": Based on ${subjectLabel}, remember the key concept and how it applies. I'll sync a deeper answer when you're online.`,
+      };
+      setOfflineHistory((prev) => [...prev, newUserMessage, offlineReply]);
+    } else {
+      setIsResponding(true);
+      setOnlineHistory((prev) => [...prev, newUserMessage]);
+      const onlineReply: Message = {
+        id: `${Date.now()}-online-reply`,
+        role: 'assistant',
+        text: 'Connecting to Vidya AI cloud for a detailed explanation... (simulation)',
+      };
+      setTimeout(() => {
+        setOnlineHistory((prev) => [...prev, onlineReply]);
+        setIsResponding(false);
+      }, 900);
+    }
+
+    setPrompt('');
+  }, [prompt, isResponding, offlineMode, subjectDefinition]);
+
+  const handleMicPress = useCallback(() => {
+    const targetHistory = offlineMode ? offlineHistory : onlineHistory;
+    const lastAssistantMessage = [...targetHistory].reverse().find((message) => message.role === 'assistant');
+    const fallback = subjectDefinition
+      ? `${subjectDefinition.title} tutor is listening. Ask your question to begin.`
+      : 'Your tutor is ready. Ask a question to get started.';
+    const utterance = lastAssistantMessage?.text ?? fallback;
+
+    Speech.stop();
+    Speech.speak(utterance, {
+      rate: offlineMode ? 0.98 : 1.05,
+      pitch: 1,
+    });
+  }, [offlineMode, offlineHistory, onlineHistory, subjectDefinition]);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -72,7 +154,7 @@ export default function SubjectAssistantScreen() {
       </View>
 
       <ScrollView style={styles.chatArea} contentContainerStyle={styles.chatContent} showsVerticalScrollIndicator={false}>
-        {sampleConversation.map((message) => {
+        {activeMessages.map((message) => {
           const isUser = message.role === 'user';
           return (
             <View key={message.id} style={styles.messageWrapper}>
@@ -106,37 +188,40 @@ export default function SubjectAssistantScreen() {
         <TouchableOpacity
           style={[styles.modePill, offlineMode && styles.modePillActive]}
           activeOpacity={0.85}
-          onPress={() => setOfflineMode(true)}>
+          onPress={() => handleModeChange('offline')}>
           <Text style={[styles.modeLabel, offlineMode && styles.modeLabelActive]}>Offline Mode</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.modePill, !offlineMode && styles.modePillActive]}
           activeOpacity={0.85}
-          onPress={() => setOfflineMode(false)}>
+          onPress={() => handleModeChange('online')}>
           <Text style={[styles.modeLabel, !offlineMode && styles.modeLabelActive]}>Online Mode</Text>
         </TouchableOpacity>
       </View>
-      <Text style={styles.modeHint}>
-        {offlineMode
-          ? 'For quicker answers without internet, stay offline.'
-          : 'For more precise answers, switch to online mode.'}
-      </Text>
+      <Text style={styles.modeHint}>{modeHintText}</Text>
 
       <View style={styles.inputRow}>
         <TextInput
           value={prompt}
           onChangeText={setPrompt}
-          placeholder="Type your question..."
+          placeholder={inputPlaceholder}
           placeholderTextColor={OnboardingPalette.textSecondary}
           style={styles.promptInput}
+          returnKeyType="send"
+          onSubmitEditing={handleSend}
         />
-        <TouchableOpacity style={styles.micButton} activeOpacity={0.85}>
+        <TouchableOpacity style={styles.micButton} activeOpacity={0.85} onPress={handleMicPress}>
           <Ionicons name="mic" size={20} color={OnboardingPalette.background} />
         </TouchableOpacity>
-        <TouchableOpacity style={styles.sendButton} activeOpacity={0.85}>
+        <TouchableOpacity
+          style={[styles.sendButton, isSendDisabled && styles.sendButtonDisabled]}
+          activeOpacity={0.85}
+          onPress={handleSend}
+          disabled={isSendDisabled}>
           <Ionicons name="arrow-up" size={18} color={OnboardingPalette.background} />
         </TouchableOpacity>
       </View>
+      {isResponding && !offlineMode ? <Text style={styles.typingIndicator}>Vidya AI is formulating an online answer…</Text> : null}
     </SafeAreaView>
   );
 }
@@ -307,5 +392,14 @@ const styles = StyleSheet.create({
     backgroundColor: OnboardingPalette.accent,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  sendButtonDisabled: {
+    opacity: 0.4,
+  },
+  typingIndicator: {
+    marginTop: 10,
+    color: OnboardingPalette.textSecondary,
+    fontSize: 12,
+    textAlign: 'center',
   },
 });
