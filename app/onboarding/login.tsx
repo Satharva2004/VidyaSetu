@@ -2,15 +2,19 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { router } from 'expo-router';
 import { useMemo, useState } from 'react';
 import {
-    SafeAreaView,
+    ActivityIndicator,
+    ScrollView,
     StyleSheet,
     Text,
     TextInput,
     TouchableOpacity,
     View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { OnboardingPalette } from '@/constants/onboarding';
+import { upsertUserProfile } from '@/lib/profile';
+import { supabase } from '@/lib/supabase';
 
 const modes = [
   { key: 'login', label: 'Log in' },
@@ -31,6 +35,8 @@ export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const title = useMemo(() => (mode === 'login' ? 'Welcome back' : 'Create account'), [mode]);
   const subtitle = useMemo(
@@ -41,9 +47,72 @@ export default function LoginScreen() {
     [mode],
   );
 
+  const handleSubmit = async () => {
+    const trimmedEmail = email.trim();
+    const trimmedPassword = password.trim();
+    const trimmedName = name.trim();
+
+    if (!trimmedEmail || !trimmedPassword || (mode === 'signup' && !trimmedName)) {
+      setErrorMessage('Please fill in all required fields.');
+      console.warn('[auth] validation failed', { trimmedEmail, trimmedPasswordLength: trimmedPassword.length, mode });
+      return;
+    }
+
+    try {
+      setSubmitting(true);
+      setErrorMessage(null);
+      console.log('[auth] handleSubmit:start', { mode, email: trimmedEmail });
+
+      if (mode === 'login') {
+        const { error } = await supabase.auth.signInWithPassword({
+          email: trimmedEmail,
+          password: trimmedPassword,
+        });
+        if (error) throw error;
+        console.log('[auth] login success', { email: trimmedEmail });
+      } else {
+        const { data, error } = await supabase.auth.signUp({
+          email: trimmedEmail,
+          password: trimmedPassword,
+          options: {
+            data: {
+              full_name: trimmedName,
+            },
+          },
+        });
+        if (error) throw error;
+
+        const userId = data.user?.id;
+        if (!userId) {
+          throw new Error('Signup succeeded but user information is missing.');
+        }
+
+        await upsertUserProfile({ userId, fullName: trimmedName, email: trimmedEmail });
+        console.log('[auth] signup success', { email: trimmedEmail, userId });
+      }
+
+      router.push(CLASS_SELECTION_ROUTE as never);
+      console.log('[auth] navigate', { destination: CLASS_SELECTION_ROUTE });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Something went wrong. Please try again.';
+      setErrorMessage(message);
+      console.error('[auth] handleSubmit:error', err);
+    } finally {
+      setSubmitting(false);
+      console.log('[auth] handleSubmit:complete');
+    }
+  };
+
+  const canSubmit =
+    !!email.trim() &&
+    !!password.trim() &&
+    (mode === 'login' || (!!name.trim() && mode === 'signup')) &&
+    !submitting;
+
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <View style={styles.container}>
+    <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        <View style={styles.container}>
         <View>
           <Text style={styles.stepText}>Step 0 of 3</Text>
           <View style={styles.progressTrack}>
@@ -112,38 +181,31 @@ export default function LoginScreen() {
           </View>
         </View>
 
+        {errorMessage ? (
+          <Text style={styles.errorText}>{errorMessage}</Text>
+        ) : null}
+
         <TouchableOpacity
-          style={styles.primaryButton}
+          style={[styles.primaryButton, !canSubmit && styles.primaryButtonDisabled]}
           activeOpacity={0.8}
-          onPress={() => router.push(CLASS_SELECTION_ROUTE as never)}>
-          <Text style={styles.primaryButtonText}>{mode === 'login' ? 'Continue' : 'Create account'}</Text>
-          <Ionicons name="arrow-forward" size={18} color={OnboardingPalette.background} />
+          disabled={!canSubmit}
+          onPress={handleSubmit}>
+          {submitting ? (
+            <ActivityIndicator color={OnboardingPalette.background} />
+          ) : (
+            <>
+              <Text style={styles.primaryButtonText}>{mode === 'login' ? 'Continue' : 'Create account'}</Text>
+              <Ionicons name="arrow-forward" size={18} color={OnboardingPalette.background} />
+            </>
+          )}
         </TouchableOpacity>
-
-        <TouchableOpacity activeOpacity={0.7}>
-          <Text style={styles.forgotText}>Forgot password?</Text>
-        </TouchableOpacity>
-
-        <View style={styles.divider}>
-          <View style={styles.line} />
-          <Text style={styles.dividerLabel}>or</Text>
-          <View style={styles.line} />
-        </View>
-
-        <View style={styles.socialButtons}>
-          {socialProviders.map((provider) => (
-            <TouchableOpacity key={provider.key} style={styles.socialButton} activeOpacity={0.8}>
-              <Ionicons name={provider.icon as keyof typeof Ionicons.glyphMap} size={18} color={OnboardingPalette.textPrimary} />
-              <Text style={styles.socialLabel}>{provider.label}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
 
         <Text style={styles.helperText}>
           By continuing you agree to the <Text style={styles.link}>Terms</Text> &{' '}
           <Text style={styles.link}>Privacy Policy</Text>.
         </Text>
-      </View>
+        </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -153,11 +215,20 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: OnboardingPalette.background,
   },
+  scrollContent: {
+    flexGrow: 1,
+    justifyContent: 'center',
+  },
   container: {
     flex: 1,
-    padding: 24,
+    paddingHorizontal: 24,
+    paddingVertical: 32,
     gap: 20,
     backgroundColor: OnboardingPalette.background,
+    justifyContent: 'center',
+    width: '100%',
+    maxWidth: 480,
+    alignSelf: 'center',
   },
   stepText: {
     color: OnboardingPalette.textSecondary,
@@ -245,10 +316,18 @@ const styles = StyleSheet.create({
     gap: 6,
     height: 54,
   },
+  primaryButtonDisabled: {
+    opacity: 0.5,
+  },
   primaryButtonText: {
     fontWeight: '700',
     color: OnboardingPalette.background,
     fontSize: 16,
+  },
+  errorText: {
+    color: '#ff6b6b',
+    fontSize: 14,
+    textAlign: 'center',
   },
   forgotText: {
     color: OnboardingPalette.textSecondary,

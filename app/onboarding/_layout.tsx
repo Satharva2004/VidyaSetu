@@ -10,7 +10,6 @@ export default function OnboardingLayout() {
       <Stack.Screen name="login" />
       <Stack.Screen name="class-selection" />
       <Stack.Screen name="subject-selection" />
-      <Stack.Screen name="content-download" />
     </Stack>
   );
 }

@@ -1,15 +1,20 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { SafeAreaView, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
+import { ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { OnboardingPalette, subjectOptions } from '@/constants/onboarding';
+import { getCurrentUserId, upsertOnboardingProgress } from '@/lib/profile';
 
 export default function SubjectSelectionScreen() {
   const [selectedSubjects, setSelectedSubjects] = useState<string[]>(['physics']);
   const [remindersEnabled, setRemindersEnabled] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const toggleSubject = (id: string) => {
+    console.log('[onboarding/subject] toggleSubject', { id });
     setSelectedSubjects((prev) =>
       prev.includes(id) ? prev.filter((subjectId) => subjectId !== id) : [...prev, id],
     );
@@ -20,6 +25,36 @@ export default function SubjectSelectionScreen() {
     const highlight = subjectOptions.find((item) => item.id === selectedSubjects[0]);
     return `${selectedSubjects.length} selected · ${highlight?.title ?? 'Personalised focus'}`;
   }, [selectedSubjects]);
+
+  const handleContinue = async () => {
+    if (!selectedSubjects.length) {
+      setErrorMessage('Pick at least one subject to continue.');
+      console.warn('[onboarding/subject] validation failed');
+      return;
+    }
+
+    try {
+      setSaving(true);
+      setErrorMessage(null);
+      console.log('[onboarding/subject] handleContinue:start', { selectedSubjects, remindersEnabled });
+      const userId = await getCurrentUserId();
+      await upsertOnboardingProgress({
+        userId,
+        subjects: selectedSubjects,
+        currentStep: 2,
+      });
+
+      router.replace('/(tabs)' as never);
+      console.log('[onboarding/subject] navigate', { destination: '/(tabs)' });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to save your subjects. Please try again.';
+      setErrorMessage(message);
+      console.error('[onboarding/subject] handleContinue:error', error);
+    } finally {
+      setSaving(false);
+      console.log('[onboarding/subject] handleContinue:complete');
+    }
+  };
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -87,17 +122,18 @@ export default function SubjectSelectionScreen() {
       </ScrollView>
 
       <View style={styles.footer}>
+        {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
         <TouchableOpacity style={styles.secondaryButton} activeOpacity={0.8} onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={18} color={OnboardingPalette.textPrimary} />
           <Text style={styles.secondaryLabel}>Back</Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={[styles.primaryButton, !selectedSubjects.length && styles.primaryButtonDisabled]}
+          style={[styles.primaryButton, (!selectedSubjects.length || saving) && styles.primaryButtonDisabled]}
           activeOpacity={0.85}
-          disabled={!selectedSubjects.length}
-          onPress={() => router.push('/onboarding/content-download')}>
-          <Text style={styles.primaryLabel}>Continue</Text>
-          <Ionicons name="arrow-forward" size={18} color={OnboardingPalette.background} />
+          disabled={!selectedSubjects.length || saving}
+          onPress={handleContinue}>
+          <Text style={styles.primaryLabel}>{saving ? 'Saving...' : 'Finish'}</Text>
+          {!saving && <Ionicons name="arrow-forward" size={18} color={OnboardingPalette.background} />}
         </TouchableOpacity>
       </View>
     </SafeAreaView>
@@ -235,6 +271,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 12,
     backgroundColor: OnboardingPalette.background,
+  },
+  errorText: {
+    color: '#ff6b6b',
+    marginBottom: 8,
+    textAlign: 'center',
+    width: '100%',
   },
   secondaryButton: {
     flex: 1,

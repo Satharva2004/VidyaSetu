@@ -1,14 +1,50 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { SafeAreaView, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { OnboardingPalette, classOptions } from '@/constants/onboarding';
+import { getCurrentUserId, upsertOnboardingProgress } from '@/lib/profile';
 
 export default function ClassSelectionScreen() {
   const [selectedClassId, setSelectedClassId] = useState(classOptions[1]?.id ?? '6');
+  const [saving, setSaving] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const selectedIndex = useMemo(() => classOptions.findIndex((item) => item.id === selectedClassId) + 1, [selectedClassId]);
+  const selectedIndex = useMemo(
+    () => classOptions.findIndex((item) => item.id === selectedClassId) + 1,
+    [selectedClassId],
+  );
+
+  const handleContinue = async () => {
+    try {
+      setSaving(true);
+      setErrorMessage(null);
+      console.log('[onboarding/class] handleContinue:start', { selectedClassId });
+      const userId = await getCurrentUserId();
+      await upsertOnboardingProgress({
+        userId,
+        classId: selectedClassId,
+        currentStep: 1,
+      });
+
+      router.push('/onboarding/subject-selection');
+      console.log('[onboarding/class] navigate', { destination: '/onboarding/subject-selection' });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to save your selection. Please try again.';
+      setErrorMessage(message);
+      console.error('[onboarding/class] handleContinue:error', error);
+    } finally {
+      setSaving(false);
+      console.log('[onboarding/class] handleContinue:complete');
+    }
+  };
+
+  const handleSelectClass = (id: string) => {
+    console.log('[onboarding/class] optionPressed', { id, previous: selectedClassId });
+    setSelectedClassId(id);
+  };
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -40,7 +76,7 @@ export default function ClassSelectionScreen() {
                 key={item.id}
                 style={[styles.card, isActive && styles.cardActive]}
                 activeOpacity={0.9}
-                onPress={() => setSelectedClassId(item.id)}>
+                onPress={() => handleSelectClass(item.id)}>
                 <View style={styles.cardHeader}>
                   <Ionicons
                     name="school-outline"
@@ -63,6 +99,7 @@ export default function ClassSelectionScreen() {
       </ScrollView>
 
       <View style={styles.footer}>
+        {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
         <TouchableOpacity style={styles.secondaryButton} activeOpacity={0.8} onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={18} color={OnboardingPalette.textPrimary} />
           <Text style={styles.secondaryLabel}>Back</Text>
@@ -70,9 +107,10 @@ export default function ClassSelectionScreen() {
         <TouchableOpacity
           style={styles.primaryButton}
           activeOpacity={0.9}
-          onPress={() => router.push('/onboarding/subject-selection')}>
-          <Text style={styles.primaryLabel}>Continue</Text>
-          <Ionicons name="arrow-forward" size={18} color={OnboardingPalette.background} />
+          disabled={saving}
+          onPress={handleContinue}>
+          <Text style={styles.primaryLabel}>{saving ? 'Saving...' : 'Continue'}</Text>
+          {!saving && <Ionicons name="arrow-forward" size={18} color={OnboardingPalette.background} />}
         </TouchableOpacity>
       </View>
     </SafeAreaView>
@@ -194,6 +232,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 12,
     backgroundColor: OnboardingPalette.background,
+  },
+  errorText: {
+    color: '#ff6b6b',
+    marginBottom: 8,
+    textAlign: 'center',
+    width: '100%',
   },
   secondaryButton: {
     flex: 1,
