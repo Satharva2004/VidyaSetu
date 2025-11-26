@@ -12,7 +12,9 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { LanguageSwitcher } from '@/components/language-switcher';
 import { OnboardingPalette } from '@/constants/onboarding';
+import { useLanguage } from '@/contexts/language';
 import { upsertUserProfile } from '@/lib/profile';
 import { supabase } from '@/lib/supabase';
 
@@ -40,14 +42,13 @@ export default function LoginScreen() {
   const [name, setName] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const { copy } = useLanguage();
+  const authCopy = copy.auth;
 
-  const title = useMemo(() => (mode === 'login' ? 'Welcome back' : 'Create account'), [mode]);
+  const title = useMemo(() => (mode === 'login' ? authCopy.loginTitle : authCopy.signupTitle), [authCopy, mode]);
   const subtitle = useMemo(
-    () =>
-      mode === 'login'
-        ? 'Offline AI tutor that keeps you learning anywhere.'
-        : 'Set up your offline-first study companion in minutes.',
-    [mode],
+    () => (mode === 'login' ? authCopy.loginSubtitle : authCopy.signupSubtitle),
+    [authCopy, mode],
   );
 
   const handleSubmit = async () => {
@@ -56,7 +57,7 @@ export default function LoginScreen() {
     const trimmedName = name.trim();
 
     if (!trimmedEmail || !trimmedPassword || (mode === 'signup' && !trimmedName)) {
-      setErrorMessage('Please fill in all required fields.');
+      setErrorMessage(authCopy.validationMessage);
       console.warn('[auth] validation failed', { trimmedEmail, trimmedPasswordLength: trimmedPassword.length, mode });
       return;
     }
@@ -120,22 +121,27 @@ export default function LoginScreen() {
     (mode === 'login' || (!!name.trim() && mode === 'signup')) &&
     !submitting;
 
+  const stepText = useMemo(() => authCopy.stepLabel(0, 3), [authCopy]);
+  const primaryCta = mode === 'login' ? authCopy.loginCta : authCopy.signupCta;
+
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         <View style={styles.container}>
         <View>
-          <Text style={styles.stepText}>Step 0 of 3</Text>
+          <Text style={styles.stepText}>{stepText}</Text>
           <View style={styles.progressTrack}>
             <View style={[styles.progressBar, { width: '15%' }]} />
           </View>
         </View>
 
         <View>
-          <Text style={styles.eyebrow}>VidyaSetu Offline</Text>
+          <Text style={styles.eyebrow}>{authCopy.eyebrow}</Text>
           <Text style={styles.title}>{title}</Text>
           <Text style={styles.subtitle}>{subtitle}</Text>
         </View>
+
+        <LanguageSwitcher />
 
         <View style={styles.modeSwitch}>
           {modes.map((item) => {
@@ -147,7 +153,9 @@ export default function LoginScreen() {
                 onPress={() => setMode(item.key)}
                 style={[styles.modeButton, isActive && styles.modeButtonActive]}
                 activeOpacity={0.9}>
-                <Text style={[styles.modeLabel, isActive && styles.modeLabelActive]}>{item.label}</Text>
+                <Text style={[styles.modeLabel, isActive && styles.modeLabelActive]}>
+                  {item.key === 'login' ? authCopy.modeLogin : authCopy.modeSignup}
+                </Text>
               </TouchableOpacity>
             );
           })}
@@ -156,7 +164,7 @@ export default function LoginScreen() {
         <View style={styles.formGroup}>
           {mode === 'signup' && (
             <View style={styles.inputWrapper}>
-              <Text style={styles.inputLabel}>Full name</Text>
+              <Text style={styles.inputLabel}>{authCopy.nameLabel}</Text>
               <TextInput
                 placeholder="Ada Lovelace"
                 placeholderTextColor={OnboardingPalette.muted}
@@ -168,7 +176,7 @@ export default function LoginScreen() {
             </View>
           )}
           <View style={styles.inputWrapper}>
-            <Text style={styles.inputLabel}>Email</Text>
+            <Text style={styles.inputLabel}>{authCopy.emailLabel}</Text>
             <TextInput
               placeholder="you@email.com"
               placeholderTextColor={OnboardingPalette.muted}
@@ -180,7 +188,7 @@ export default function LoginScreen() {
             />
           </View>
           <View style={styles.inputWrapper}>
-            <Text style={styles.inputLabel}>Password</Text>
+            <Text style={styles.inputLabel}>{authCopy.passwordLabel}</Text>
             <TextInput
               placeholder="••••••••"
               placeholderTextColor={OnboardingPalette.muted}
@@ -205,15 +213,14 @@ export default function LoginScreen() {
             <ActivityIndicator color={OnboardingPalette.background} />
           ) : (
             <>
-              <Text style={styles.primaryButtonText}>{mode === 'login' ? 'Continue' : 'Create account'}</Text>
+              <Text style={styles.primaryButtonText}>{primaryCta}</Text>
               <Ionicons name="arrow-forward" size={18} color={OnboardingPalette.background} />
             </>
           )}
         </TouchableOpacity>
 
         <Text style={styles.helperText}>
-          By continuing you agree to the <Text style={styles.link}>Terms</Text> &{' '}
-          <Text style={styles.link}>Privacy Policy</Text>.
+          {authCopy.helperText}
         </Text>
         </View>
       </ScrollView>

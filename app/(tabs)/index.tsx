@@ -2,18 +2,18 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    RefreshControl,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { OnboardingPalette, getSubjectDefinition } from '@/constants/onboarding';
+import { OnboardingPalette, classOptions, getSubjectDefinition } from '@/constants/onboarding';
 import { supabase } from '@/lib/supabase';
 
 const quickActions = [
@@ -52,6 +52,7 @@ export default function HomeScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [classLabel, setClassLabel] = useState<string | null>(null);
 
   const greetSubtitle = useMemo(() => {
     return new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'short' });
@@ -77,7 +78,7 @@ export default function HomeScreen() {
           .select('questions_today, problems_solved, streak_days')
           .eq('user_id', user.id)
           .maybeSingle(),
-        supabase.from('onboarding_progress').select('subjects').eq('user_id', user.id).maybeSingle(),
+        supabase.from('onboarding_progress').select('subjects, class_id').eq('user_id', user.id).maybeSingle(),
       ]);
 
       if (profileRes.data?.full_name) {
@@ -109,6 +110,14 @@ export default function HomeScreen() {
         .filter(Boolean) as SelectedSubject[];
 
       setSelectedSubjects(mappedSubjects);
+
+      const classId = onboardingRes.data?.class_id ?? null;
+      if (classId) {
+        const match = classOptions.find((option) => option.id === classId);
+        setClassLabel(match?.label ?? `Class ${classId}`);
+      } else {
+        setClassLabel(null);
+      }
     } catch (error) {
       console.error('[home] fetchHomeData', error);
       setErrorMessage(error instanceof Error ? error.message : 'Unable to load home data.');
@@ -182,6 +191,12 @@ export default function HomeScreen() {
           <View>
             <Text style={styles.heroGreeting}>Hello, {profileName}!</Text>
             <Text style={styles.heroSubtext}>{greetSubtitle}</Text>
+          </View>
+          <View style={styles.heroStatusRow}>
+            <View style={styles.statusPill}>
+              <Ionicons name="school-outline" size={14} color={OnboardingPalette.accent} />
+              <Text style={styles.statusLabel}>{classLabel ?? 'Standard not set'}</Text>
+            </View>
           </View>
         </View>
 
@@ -270,6 +285,11 @@ const styles = StyleSheet.create({
     gap: 12,
     borderWidth: 1,
     borderColor: OnboardingPalette.outline,
+  },
+  heroStatusRow: {
+    marginTop: 8,
+    flexDirection: 'row',
+    gap: 8,
   },
   heroGreeting: {
     color: OnboardingPalette.textPrimary,

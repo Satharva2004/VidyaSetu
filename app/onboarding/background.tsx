@@ -1,10 +1,12 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { LanguageSwitcher } from '@/components/language-switcher';
 import { OnboardingPalette } from '@/constants/onboarding';
+import { useLanguage } from '@/contexts/language';
 import { getCurrentUserId, upsertOnboardingProgress } from '@/lib/profile';
 
 const schoolOptions = [
@@ -14,25 +16,21 @@ const schoolOptions = [
 ] as const;
 
 export default function BackgroundScreen() {
-  const [motherTongue, setMotherTongue] = useState('English');
+  const { language, copy } = useLanguage();
   const [schoolType, setSchoolType] = useState<typeof schoolOptions[number]['id']>('english');
   const [saving, setSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const onboardingCopy = copy.onboarding;
 
   const handleContinue = async () => {
-    if (!motherTongue.trim()) {
-      setErrorMessage('Please tell us your mother tongue.');
-      return;
-    }
-
     try {
       setSaving(true);
       setErrorMessage(null);
-      console.log('[onboarding/background] handleContinue:start', { motherTongue, schoolType });
+      console.log('[onboarding/background] handleContinue:start', { language, schoolType });
       const userId = await getCurrentUserId();
       await upsertOnboardingProgress({
         userId,
-        motherTongue: motherTongue.trim(),
+        motherTongue: language,
         schoolType,
         currentStep: 1,
       });
@@ -61,25 +59,16 @@ export default function BackgroundScreen() {
           </View>
         </View>
 
-        <Text style={styles.eyebrow}>Welcome to Offline AI</Text>
-        <Text style={styles.title}>Tell us about your learning background</Text>
+        <Text style={styles.eyebrow}>{onboardingCopy.backgroundEyebrow}</Text>
+        <Text style={styles.title}>{onboardingCopy.backgroundTitle}</Text>
 
         <View style={styles.fieldGroup}>
-          <Text style={styles.fieldLabel}>Mother Tongue</Text>
-          <View style={styles.inputWrapper}>
-            <TextInput
-              value={motherTongue}
-              onChangeText={setMotherTongue}
-              style={styles.input}
-              placeholder="Enter mother tongue"
-              placeholderTextColor={OnboardingPalette.muted}
-            />
-            <Ionicons name="language-outline" size={16} color={OnboardingPalette.textSecondary} />
-          </View>
+          <Text style={styles.fieldLabel}>{onboardingCopy.motherTongueLabel}</Text>
+          <LanguageSwitcher style={styles.languageSwitcher} />
         </View>
 
         <View style={styles.fieldGroup}>
-          <Text style={styles.fieldLabel}>Type of School</Text>
+          <Text style={styles.fieldLabel}>{onboardingCopy.typeOfSchoolLabel}</Text>
           <View style={styles.optionList}>
             {schoolOptions.map((option) => {
               const isActive = schoolType === option.id;
@@ -102,7 +91,7 @@ export default function BackgroundScreen() {
         {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
 
         <TouchableOpacity style={styles.primaryButton} activeOpacity={0.85} disabled={saving} onPress={handleContinue}>
-          <Text style={styles.primaryLabel}>{saving ? 'Saving...' : 'Continue'}</Text>
+          <Text style={styles.primaryLabel}>{saving ? onboardingCopy.savingLabel : onboardingCopy.continueCta}</Text>
         </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
@@ -149,6 +138,9 @@ const styles = StyleSheet.create({
   fieldLabel: {
     color: OnboardingPalette.textSecondary,
     fontSize: 14,
+  },
+  languageSwitcher: {
+    gap: 8,
   },
   inputWrapper: {
     backgroundColor: OnboardingPalette.surface,

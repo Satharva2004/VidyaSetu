@@ -2,10 +2,12 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { Audio } from 'expo-av';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as Speech from 'expo-speech';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
   Easing,
+  Image,
+  Linking,
   ScrollView,
   StyleSheet,
   Text,
@@ -13,14 +15,42 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import Markdown from 'react-native-markdown-display';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { OnboardingPalette, getSubjectDefinition } from '@/constants/onboarding';
+import { useQAModel } from '@/hooks/useQAModel';
+import { supabase } from '@/lib/supabase';
+
+type OnlineImage = {
+  title: string;
+  imageUrl: string;
+  pageUrl: string;
+  thumbnailUrl?: string;
+};
+
+type OnlineVideo = {
+  videoId: string;
+  title: string;
+  url: string;
+  channelTitle?: string;
+  publishedAt?: string;
+};
+
+type OnlineSource = {
+  title: string;
+  url: string;
+};
 
 type Message = {
   id: string;
   role: 'user' | 'assistant';
   text: string;
+  attachments?: {
+    images?: OnlineImage[];
+    videos?: OnlineVideo[];
+    sources?: OnlineSource[];
+  };
 };
 
 const offlineSeedConversation: Message[] = [
@@ -47,16 +77,7 @@ const offlineSeedConversation: Message[] = [
 ];
 
 const onlineSeedConversation: Message[] = [
-  {
-    id: 'online_intro',
-    role: 'assistant',
-    text: 'Switch to Online Mode to connect with Vidya AI cloud for deeper, up-to-date explanations.',
-  },
-  {
-    id: 'online_tip',
-    role: 'assistant',
-    text: 'Ask multi-step or exam questions here and I will reason through them with internet assistance.',
-  },
+ 
 ];
 
 export default function SubjectAssistantScreen() {
@@ -69,10 +90,15 @@ export default function SubjectAssistantScreen() {
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
+  const [chatError, setChatError] = useState<string | null>(null);
+  const [classId, setClassId] = useState<string | null>(null);
+  const [classLoadError, setClassLoadError] = useState<string | null>(null);
   const micScale = useRef(new Animated.Value(1)).current;
   const wavePulse = useRef(new Animated.Value(0)).current;
   const waveLoopRef = useRef<Animated.CompositeAnimation | null>(null);
   const recordingRef = useRef<Audio.Recording | null>(null);
+  const typingDots = useRef([new Animated.Value(0.3), new Animated.Value(0.3), new Animated.Value(0.3)]).current;
+  const typingLoopRef = useRef<Animated.CompositeAnimation[]>([]);
 
   const subjectDefinition = subjectId ? getSubjectDefinition(subjectId) : null;
 
@@ -80,6 +106,11 @@ export default function SubjectAssistantScreen() {
     if (!subjectDefinition) return 'Subject AI';
     return `${subjectDefinition.title} AI`;
   }, [subjectDefinition]);
+
+  const { isReady: isOfflineReady, isLoading: isOfflineLoading, error: offlineDataError, findAnswer } = useQAModel(
+    classId,
+    subjectId ?? null,
+  );
 
   const activeMessages = offlineMode ? offlineHistory : onlineHistory;
   const modeHintText = offlineMode
@@ -90,11 +121,193 @@ export default function SubjectAssistantScreen() {
     : 'Ask anything (requires internet)...';
   const isSendDisabled = !prompt.trim() || isResponding;
 
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadClassPreference = async () => {
+      try {
+        setClassLoadError(null);
+        const {
+          data: { user },
+          error,
+        } = await supabase.auth.getUser();
+        if (error) throw error;
+        if (!user?.id) throw new Error('Please log in again to access offline packs.');
+
+        const { data, error: progressError } = await supabase
+          .from('onboarding_progress')
+          .select('class_id')
+          .eq('user_id', user.id)
+          .maybeSingle();
+
+        if (progressError && progressError.code !== 'PGRST116') {
+          throw progressError;
+        }
+
+        if (!isMounted) return;
+        setClassId((data?.class_id ?? '8') as string);
+      } catch (err) {
+        if (!isMounted) return;
+        setClassLoadError(err instanceof Error ? err.message : 'Unable to load your class preference.');
+      }
+    };
+
+    loadClassPreference();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const offlineStatusText = useMemo(() => {
+    if (!offlineMode) return null;
+    if (classLoadError) return classLoadError;
+    if (isOfflineLoading) return 'Preparing your offline pack…';
+    if (offlineDataError) return offlineDataError;
+    if (!isOfflineReady) return 'Offline pack is not available for this subject yet.';
+    return null;
+  }, [classLoadError, isOfflineLoading, offlineDataError, isOfflineReady, offlineMode]);
+
   const handleModeChange = useCallback((mode: 'offline' | 'online') => {
     setOfflineMode(mode === 'offline');
     setPrompt('');
     setIsResponding(false);
   }, []);
+
+  const fetchOnlineAnswer = useCallback(
+    async (query: string): Promise<Message> => {
+      const token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiIwNzI0MTZkMC0zOWFlLTQ4M2YtYmZhNy0yNTY4MjgxNWMwMGQiLCJpYXQiOjE3NjQxODY4ODQsImV4cCI6MTc2NTA1MDg4NH0.Hjhy7bUi9s3gQlXLyRrDkDK0ATK4LGaN64kSlOyXj90";
+      if (!token) {
+        throw new Error('Missing Lunnaa token. Set EXPO_PUBLIC_LUNNAA_TOKEN in your .env.');
+      }
+
+      const response = await fetch('https://lunnaa.vercel.app/api/proxy/chat/stream', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+          Accept: 'text/event-stream',
+        },
+        body: JSON.stringify({ prompt: query, options: { includeYouTube: true, includeImageSearch: true } }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || 'Unable to reach Lunnaa API.');
+      }
+
+      let aggregatedText = '';
+      let images: OnlineImage[] = [];
+      let videos: OnlineVideo[] = [];
+      let sources: OnlineSource[] = [];
+
+      const applyEventData = (eventType: string, dataLine: string) => {
+        if (!dataLine) return;
+        try {
+          const parsed = JSON.parse(dataLine);
+          switch (eventType) {
+            case 'message':
+              aggregatedText += parsed?.text ?? '';
+              break;
+            case 'images':
+              images = parsed?.images ?? images;
+              break;
+            case 'youtubeResults':
+              videos =
+                parsed?.videos?.map((video: any) => ({
+                  videoId: video.videoId,
+                  title: video.title,
+                  url: video.url ?? `https://www.youtube.com/watch?v=${video.videoId}`,
+                  channelTitle: video.channelTitle,
+                  publishedAt: video.publishedAt,
+                })) ?? videos;
+              break;
+            case 'sources':
+              sources = parsed?.sources ?? sources;
+              break;
+            default:
+              break;
+          }
+        } catch (error) {
+          console.warn('[online] event parse error', error);
+        }
+      };
+
+      const processBufferChunks = (buffer: string) => {
+        let workingBuffer = buffer;
+        let boundary = workingBuffer.indexOf('\n\n');
+        while (boundary > -1) {
+          const chunk = workingBuffer.slice(0, boundary).trim();
+          workingBuffer = workingBuffer.slice(boundary + 2);
+          boundary = workingBuffer.indexOf('\n\n');
+          if (!chunk) continue;
+
+          let eventType = 'message';
+          let dataLine = '';
+          for (const line of chunk.split('\n')) {
+            if (line.startsWith('event:')) {
+              eventType = line.replace('event:', '').trim();
+            } else if (line.startsWith('data:')) {
+              dataLine += line.replace('data:', '').trim();
+            }
+          }
+
+          applyEventData(eventType, dataLine);
+        }
+        return workingBuffer;
+      };
+
+      if (!response.body || typeof response.body.getReader !== 'function') {
+        const payload = await response.text();
+        const normalized = payload.replace(/\r\n/g, '\n');
+        normalized
+          .split('\n\n')
+          .map((chunk) => chunk.trim())
+          .filter(Boolean)
+          .forEach((chunk) => {
+            let eventType = 'message';
+            let dataLine = '';
+            for (const line of chunk.split('\n')) {
+              if (line.startsWith('event:')) {
+                eventType = line.replace('event:', '').trim();
+              } else if (line.startsWith('data:')) {
+                dataLine += line.replace('data:', '').trim();
+              }
+            }
+            applyEventData(eventType, dataLine);
+          });
+      } else {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        let buffer = '';
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          buffer = processBufferChunks(buffer);
+        }
+        // process any trailing data without delimiter
+        if (buffer.trim()) {
+          processBufferChunks(`${buffer}\n\n`);
+        }
+      }
+
+      if (!aggregatedText.trim()) {
+        aggregatedText = 'I was unable to find an answer right now.';
+      }
+
+      return {
+        id: `${Date.now()}-online-response`,
+        role: 'assistant',
+        text: aggregatedText.trim(),
+        attachments: {
+          images: images.length ? images : undefined,
+          videos: videos.length ? videos : undefined,
+          sources: sources.length ? sources : undefined,
+        },
+      };
+    },
+    [],
+  );
 
   const handleSend = useCallback(() => {
     const trimmed = prompt.trim();
@@ -107,29 +320,41 @@ export default function SubjectAssistantScreen() {
     };
 
     if (offlineMode) {
-      const subjectLabel = subjectDefinition?.title ?? 'this subject';
+      const qaResult = findAnswer(trimmed);
+      const fallbackText = offlineDataError
+        ? offlineDataError
+        : isOfflineLoading
+          ? 'Offline pack is still loading. Please wait a moment.'
+          : 'I could not find that in the offline pack yet. Try rephrasing or switch to online mode.';
       const offlineReply: Message = {
         id: `${Date.now()}-offline-reply`,
         role: 'assistant',
-        text: `Here is an offline summary for "${trimmed}": Based on ${subjectLabel}, remember the key concept and how it applies. I'll sync a deeper answer when you're online.`,
+        text: qaResult
+          ? qaResult.topic
+            ? `**${qaResult.topic}**\n\n${qaResult.answer}`
+            : qaResult.answer
+          : fallbackText,
       };
       setOfflineHistory((prev) => [...prev, newUserMessage, offlineReply]);
     } else {
       setIsResponding(true);
+      setChatError(null);
       setOnlineHistory((prev) => [...prev, newUserMessage]);
-      const onlineReply: Message = {
-        id: `${Date.now()}-online-reply`,
-        role: 'assistant',
-        text: 'Connecting to Vidya AI cloud for a detailed explanation... (simulation)',
-      };
-      setTimeout(() => {
-        setOnlineHistory((prev) => [...prev, onlineReply]);
-        setIsResponding(false);
-      }, 900);
+      fetchOnlineAnswer(trimmed)
+        .then((assistantMessage) => {
+          setOnlineHistory((prev) => [...prev, assistantMessage]);
+        })
+        .catch((error) => {
+          console.error('[online] fetch error', error);
+          setChatError(error instanceof Error ? error.message : 'Unable to fetch online answer.');
+        })
+        .finally(() => {
+          setIsResponding(false);
+        });
     }
 
     setPrompt('');
-  }, [prompt, isResponding, offlineMode, subjectDefinition]);
+  }, [fetchOnlineAnswer, findAnswer, isOfflineLoading, offlineDataError, offlineMode, isResponding, prompt]);
 
   const animateMic = useCallback(() => {
     Animated.sequence([
@@ -147,12 +372,16 @@ export default function SubjectAssistantScreen() {
     ]).start();
   }, [micScale]);
 
+  const maxSpeechLength = (Speech as unknown as { maxSpeechInputLength?: number })?.maxSpeechInputLength ?? 3900;
+
   const speakText = useCallback(
     async (utterance: string, options?: Speech.SpeechOptions) => {
       setVoiceError(null);
       try {
         await Speech.stop();
-        Speech.speak(utterance, {
+        const truncatedUtterance =
+          utterance.length > maxSpeechLength ? `${utterance.slice(0, maxSpeechLength - 1)}…` : utterance;
+        Speech.speak(truncatedUtterance, {
           ...options,
           rate: options?.rate ?? 1,
           pitch: options?.pitch ?? 1,
@@ -179,7 +408,7 @@ export default function SubjectAssistantScreen() {
         setVoiceError(error instanceof Error ? error.message : 'Unable to trigger text-to-speech.');
       }
     },
-    [],
+    [maxSpeechLength],
   );
 
   const startWaveAnimation = useCallback(() => {
@@ -207,6 +436,39 @@ export default function SubjectAssistantScreen() {
     waveLoopRef.current?.stop();
     wavePulse.setValue(0);
   }, [wavePulse]);
+
+  useEffect(() => {
+    typingLoopRef.current.forEach((anim) => anim.stop());
+    typingLoopRef.current = [];
+
+    if (isResponding && !offlineMode) {
+      typingDots.forEach((dot, index) => {
+        const sequence = Animated.sequence([
+          Animated.delay(index * 120),
+          Animated.timing(dot, {
+            toValue: 1,
+            duration: 360,
+            useNativeDriver: true,
+          }),
+          Animated.timing(dot, {
+            toValue: 0.3,
+            duration: 360,
+            useNativeDriver: true,
+          }),
+        ]);
+        const loop = Animated.loop(sequence);
+        typingLoopRef.current.push(loop);
+        loop.start();
+      });
+    } else {
+      typingDots.forEach((dot) => dot.setValue(0.3));
+    }
+
+    return () => {
+      typingLoopRef.current.forEach((anim) => anim.stop());
+      typingLoopRef.current = [];
+    };
+  }, [isResponding, offlineMode, typingDots]);
 
   const startRecording = useCallback(async () => {
     try {
@@ -301,6 +563,11 @@ export default function SubjectAssistantScreen() {
     [speakText],
   );
 
+  const handleOpenLink = useCallback((url?: string) => {
+    if (!url) return;
+    Linking.openURL(url).catch((error) => console.warn('[link] open error', error));
+  }, []);
+
   const micStatusMessage = isRecording
     ? 'Listening… tap the mic to finish.'
     : isTranscribing
@@ -336,7 +603,11 @@ export default function SubjectAssistantScreen() {
                   </View>
                 )}
                 <View style={[styles.messageBubble, isUser ? styles.userBubble : styles.assistantBubble]}>
-                  <Text style={[styles.messageText, isUser ? styles.userText : styles.assistantText]}>{message.text}</Text>
+                  {isUser ? (
+                    <Text style={[styles.messageText, styles.userText]}>{message.text}</Text>
+                  ) : (
+                    <Markdown style={markdownStyles}>{message.text}</Markdown>
+                  )}
                 </View>
                 {isUser && (
                   <View style={[styles.avatarBadge, styles.userAvatar]}>
@@ -350,9 +621,82 @@ export default function SubjectAssistantScreen() {
                   <Text style={styles.listenLabel}>Listen</Text>
                 </TouchableOpacity>
               )}
+              {!!message.attachments?.images?.length && (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.attachmentScroll}>
+                  {message.attachments.images.map((image) => (
+                    <TouchableOpacity
+                      key={`${message.id}-${image.imageUrl}`}
+                      style={styles.imageCard}
+                      activeOpacity={0.85}
+                      onPress={() => handleOpenLink(image.pageUrl)}>
+                      <Image source={{ uri: image.imageUrl }} style={styles.imageThumb} resizeMode="cover" />
+                      <Text style={styles.imageTitle} numberOfLines={2}>
+                        {image.title}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              )}
+              {!!message.attachments?.videos?.length && (
+                <View style={styles.videoList}>
+                  {message.attachments.videos.map((video) => (
+                    <TouchableOpacity
+                      key={`${message.id}-${video.videoId}`}
+                      style={styles.videoItem}
+                      activeOpacity={0.85}
+                      onPress={() => handleOpenLink(video.url)}>
+                      <Ionicons name="logo-youtube" size={18} color={OnboardingPalette.accent} />
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.videoTitle} numberOfLines={2}>
+                          {video.title}
+                        </Text>
+                        {video.channelTitle ? (
+                          <Text style={styles.videoMeta}>{video.channelTitle}</Text>
+                        ) : null}
+                      </View>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+              {!!message.attachments?.sources?.length && (
+                <View style={styles.sourceList}>
+                  <ScrollView
+                    style={styles.sourceScroll}
+                    nestedScrollEnabled
+                    showsVerticalScrollIndicator={message.attachments.sources!.length > 4}>
+                    {message.attachments.sources.map((source) => (
+                      <TouchableOpacity
+                        key={`${message.id}-${source.url}`}
+                        style={styles.sourceItem}
+                        activeOpacity={0.85}
+                        onPress={() => handleOpenLink(source.url)}>
+                        <Ionicons name="link" size={14} color={OnboardingPalette.accent} />
+                        <Text style={styles.sourceTitle} numberOfLines={1}>
+                          {source.title}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+              )}
             </View>
           );
         })}
+        {isResponding && !offlineMode ? (
+          <View style={styles.typingWrapper}>
+            <View style={styles.avatarBadge}>
+              <Ionicons name="sparkles" size={16} color={OnboardingPalette.accent} />
+            </View>
+            <View style={[styles.messageBubble, styles.assistantBubble, styles.typingBubble]}>
+              <Text style={styles.typingLabel}>Vidya AI is formulating an answer…</Text>
+              <View style={styles.typingDotsRow}>
+                {typingDots.map((dot, idx) => (
+                  <Animated.View key={`typing-dot-${idx}`} style={[styles.typingDot, { opacity: dot }]} />
+                ))}
+              </View>
+            </View>
+          </View>
+        ) : null}
       </ScrollView>
 
       <View style={styles.modeSwitcher}>
@@ -370,6 +714,7 @@ export default function SubjectAssistantScreen() {
         </TouchableOpacity>
       </View>
       <Text style={styles.modeHint}>{modeHintText}</Text>
+      {offlineStatusText ? <Text style={styles.packStatus}>{offlineStatusText}</Text> : null}
 
       <View style={styles.inputRow}>
         {micStatusMessage ? (
@@ -417,7 +762,8 @@ export default function SubjectAssistantScreen() {
           </TouchableOpacity>
         </Animated.View>
       </View>
-      {isResponding && !offlineMode ? <Text style={styles.typingIndicator}>Vidya AI is formulating an online answer…</Text> : null}
+     
+      {chatError ? <Text style={styles.speechError}>{chatError}</Text> : null}
       {voiceError ? <Text style={styles.speechError}>{voiceError}</Text> : null}
     </SafeAreaView>
   );
@@ -530,6 +876,72 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '500',
   },
+  attachmentScroll: {
+    marginTop: 8,
+  },
+  imageCard: {
+    width: 140,
+    marginRight: 12,
+    backgroundColor: OnboardingPalette.surface,
+    borderRadius: 16,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: OnboardingPalette.outline,
+  },
+  imageThumb: {
+    width: '100%',
+    height: 90,
+  },
+  imageTitle: {
+    color: OnboardingPalette.textPrimary,
+    fontSize: 12,
+    padding: 8,
+  },
+  videoList: {
+    marginTop: 8,
+    gap: 8,
+  },
+  videoItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: OnboardingPalette.surface,
+    borderRadius: 12,
+    padding: 10,
+  },
+  videoTitle: {
+    color: OnboardingPalette.textPrimary,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  videoMeta: {
+    color: OnboardingPalette.textSecondary,
+    fontSize: 11,
+    marginTop: 2,
+  },
+  sourceList: {
+    marginTop: 10,
+    gap: 6,
+    borderRadius: 16,
+    backgroundColor: OnboardingPalette.surface,
+    borderWidth: 1,
+    borderColor: OnboardingPalette.outline,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  sourceScroll: {
+    maxHeight: 200,
+  },
+  sourceItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 6,
+  },
+  sourceTitle: {
+    color: OnboardingPalette.accent,
+    fontSize: 12,
+  },
   modeSwitcher: {
     flexDirection: 'row',
     backgroundColor: OnboardingPalette.surface,
@@ -616,6 +1028,29 @@ const styles = StyleSheet.create({
     fontSize: 12,
     textAlign: 'center',
   },
+  typingWrapper: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 8,
+  },
+  typingBubble: {
+    gap: 6,
+  },
+  typingLabel: {
+    color: OnboardingPalette.textSecondary,
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  typingDotsRow: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  typingDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: OnboardingPalette.accent,
+  },
   voiceStatus: {
     marginTop: 6,
     color: OnboardingPalette.textSecondary,
@@ -636,13 +1071,56 @@ const styles = StyleSheet.create({
   },
   statusLabel: {
     color: OnboardingPalette.textPrimary,
-    fontSize: 14,
-    flexShrink: 1,
+    fontSize: 13,
   },
   speechError: {
-    marginTop: 4,
-    color: '#ff6b6b',
-    fontSize: 12,
+    marginTop: 10,
+    color: '#D84040',
     textAlign: 'center',
+  },
+  packStatus: {
+    color: OnboardingPalette.textSecondary,
+    fontSize: 12,
+    marginBottom: 10,
+  },
+});
+
+const markdownStyles = StyleSheet.create({
+  body: {
+    color: OnboardingPalette.textPrimary,
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  heading1: {
+    fontSize: 20,
+    fontWeight: '700',
+    marginBottom: 6,
+    color: OnboardingPalette.textPrimary,
+  },
+  heading2: {
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 4,
+    color: OnboardingPalette.textPrimary,
+  },
+  paragraph: {
+    marginBottom: 8,
+  },
+  listItem: {
+    flexDirection: 'row',
+    marginBottom: 4,
+  },
+  listItemText: {
+    flex: 1,
+  },
+  bullet_list: {
+    marginBottom: 8,
+  },
+  ordered_list: {
+    marginBottom: 8,
+  },
+  link: {
+    color: OnboardingPalette.accent,
+    textDecorationLine: 'underline',
   },
 });
