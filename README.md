@@ -1,4 +1,15 @@
-# Welcome to your Expo app 👋
+<table>
+<tr>
+<td width="100" align="center">
+  <img src="https://github.com/user-attachments/assets/8343630c-0ea8-4b5d-8144-5e94f3ed44d4" width="90" />
+</td>
+<td>
+  <h1 style="margin: 0; padding: 0;">VidyaSetu - विद्यासेतू  an E-Learning platform with offline AI access for underprivileged students</h1>
+</td>
+</tr>
+</table>
+
+<img width="2000" height="1600" alt="vidyasetu marketing" src="https://github.com/user-attachments/assets/9c79221a-f898-4b5e-b741-138f6b995ada" />
 
 This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
 
