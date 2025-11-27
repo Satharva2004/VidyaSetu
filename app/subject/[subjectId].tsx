@@ -4,21 +4,22 @@ import { router, useLocalSearchParams } from 'expo-router';
 import * as Speech from 'expo-speech';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Animated,
-  Easing,
-  Image,
-  Linking,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    Animated,
+    Easing,
+    Image,
+    Linking,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 import Markdown from 'react-native-markdown-display';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { OnboardingPalette, getSubjectDefinition } from '@/constants/onboarding';
+import { useLanguage } from '@/contexts/language';
 import { useQAModel } from '@/hooks/useQAModel';
 import { supabase } from '@/lib/supabase';
 
@@ -82,6 +83,8 @@ const onlineSeedConversation: Message[] = [
 
 export default function SubjectAssistantScreen() {
   const { subjectId } = useLocalSearchParams<{ subjectId?: string }>();
+  const { copy } = useLanguage();
+  const subjectCopy = copy.subject;
   const [prompt, setPrompt] = useState('');
   const [offlineMode, setOfflineMode] = useState(true);
   const [offlineHistory, setOfflineHistory] = useState<Message[]>(offlineSeedConversation);
@@ -113,12 +116,8 @@ export default function SubjectAssistantScreen() {
   );
 
   const activeMessages = offlineMode ? offlineHistory : onlineHistory;
-  const modeHintText = offlineMode
-    ? 'Offline packs give you instant answers without data. Switch modes for cloud help when you are connected.'
-    : 'Online mode streams richer explanations with the latest knowledge.';
-  const inputPlaceholder = offlineMode
-    ? 'Ask using the offline pack...'
-    : 'Ask anything (requires internet)...';
+  const modeHintText = offlineMode ? subjectCopy.offlineHint : subjectCopy.onlineHint;
+  const inputPlaceholder = offlineMode ? subjectCopy.offlinePlaceholder : subjectCopy.onlinePlaceholder;
   const isSendDisabled = !prompt.trim() || isResponding;
 
   useEffect(() => {
@@ -148,7 +147,7 @@ export default function SubjectAssistantScreen() {
         setClassId((data?.class_id ?? '8') as string);
       } catch (err) {
         if (!isMounted) return;
-        setClassLoadError(err instanceof Error ? err.message : 'Unable to load your class preference.');
+        setClassLoadError(err instanceof Error ? err.message : subjectCopy.loadPreferenceError);
       }
     };
 
@@ -156,16 +155,16 @@ export default function SubjectAssistantScreen() {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [subjectCopy.loadPreferenceError]);
 
   const offlineStatusText = useMemo(() => {
     if (!offlineMode) return null;
     if (classLoadError) return classLoadError;
-    if (isOfflineLoading) return 'Preparing your offline pack…';
+    if (isOfflineLoading) return subjectCopy.offlineLoading;
     if (offlineDataError) return offlineDataError;
-    if (!isOfflineReady) return 'Offline pack is not available for this subject yet.';
+    if (!isOfflineReady) return subjectCopy.offlineUnavailable;
     return null;
-  }, [classLoadError, isOfflineLoading, offlineDataError, isOfflineReady, offlineMode]);
+  }, [classLoadError, isOfflineLoading, offlineDataError, isOfflineReady, offlineMode, subjectCopy.offlineLoading, subjectCopy.offlineUnavailable]);
 
   const handleModeChange = useCallback((mode: 'offline' | 'online') => {
     setOfflineMode(mode === 'offline');
@@ -321,11 +320,7 @@ export default function SubjectAssistantScreen() {
 
     if (offlineMode) {
       const qaResult = findAnswer(trimmed);
-      const fallbackText = offlineDataError
-        ? offlineDataError
-        : isOfflineLoading
-          ? 'Offline pack is still loading. Please wait a moment.'
-          : 'I could not find that in the offline pack yet. Try rephrasing or switch to online mode.';
+      const fallbackText = offlineDataError ?? (isOfflineLoading ? subjectCopy.offlineLoading : subjectCopy.offlineNoAnswer);
       const offlineReply: Message = {
         id: `${Date.now()}-offline-reply`,
         role: 'assistant',
@@ -569,9 +564,9 @@ export default function SubjectAssistantScreen() {
   }, []);
 
   const micStatusMessage = isRecording
-    ? 'Listening… tap the mic to finish.'
+    ? subjectCopy.offlineModeLabel
     : isTranscribing
-      ? 'Transcribing your question…'
+      ? subjectCopy.onlineModeLabel
       : null;
 
   return (
@@ -704,13 +699,13 @@ export default function SubjectAssistantScreen() {
           style={[styles.modePill, offlineMode && styles.modePillActive]}
           activeOpacity={0.85}
           onPress={() => handleModeChange('offline')}>
-          <Text style={[styles.modeLabel, offlineMode && styles.modeLabelActive]}>Offline Mode</Text>
+          <Text style={[styles.modeLabel, offlineMode && styles.modeLabelActive]}>{subjectCopy.offlineModeLabel}</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.modePill, !offlineMode && styles.modePillActive]}
           activeOpacity={0.85}
           onPress={() => handleModeChange('online')}>
-          <Text style={[styles.modeLabel, !offlineMode && styles.modeLabelActive]}>Online Mode</Text>
+          <Text style={[styles.modeLabel, !offlineMode && styles.modeLabelActive]}>{subjectCopy.onlineModeLabel}</Text>
         </TouchableOpacity>
       </View>
       <Text style={styles.modeHint}>{modeHintText}</Text>

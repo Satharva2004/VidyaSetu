@@ -14,22 +14,15 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { OnboardingPalette, classOptions, getSubjectDefinition } from '@/constants/onboarding';
+import { useLanguage } from '@/contexts/language';
+import { QuickActionKey } from '@/lib/i18n';
 import { supabase } from '@/lib/supabase';
 
-const quickActions = [
-  {
-    id: 'ask',
-    title: 'Ask Questions',
-    description: 'Speak your doubts',
-    icon: 'mic-outline',
-  },
-  {
-    id: 'solve',
-    title: 'Solve Math',
-    description: 'Draw & solve problems',
-    icon: 'pencil-outline',
-  },
-];
+const quickActionOrder: QuickActionKey[] = ['ask', 'solve'];
+const quickActionIcons: Record<QuickActionKey, keyof typeof Ionicons.glyphMap> = {
+  ask: 'mic-outline',
+  solve: 'pencil-outline',
+};
 
 const statConfig = [
   { id: 'questions', label: 'Questions asked today', key: 'questions_today' },
@@ -46,6 +39,7 @@ type SelectedSubject = {
 
 export default function HomeScreen() {
   const router = useRouter();
+  const { copy } = useLanguage();
   const [profileName, setProfileName] = useState('Student');
   const [statCards, setStatCards] = useState(() => statConfig.map((item) => ({ ...item, value: '0' })));
   const [selectedSubjects, setSelectedSubjects] = useState<SelectedSubject[]>([]);
@@ -53,10 +47,23 @@ export default function HomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [classLabel, setClassLabel] = useState<string | null>(null);
+  const homeCopy = copy.home;
 
   const greetSubtitle = useMemo(() => {
     return new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'short' });
   }, []);
+
+  const quickActions = useMemo(
+    () =>
+      quickActionOrder.map((key) => ({
+        id: key,
+        icon: quickActionIcons[key],
+        ...homeCopy.quickActions[key],
+      })),
+    [homeCopy],
+  );
+
+  const effectiveClassLabel = classLabel ?? homeCopy.statusFallback;
 
   const fetchHomeData = useCallback(async () => {
     try {
@@ -173,7 +180,7 @@ export default function HomeScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={OnboardingPalette.accent} />}>
         <View style={styles.appBar}>
           <Ionicons name="leaf-outline" size={20} color={OnboardingPalette.accent} />
-          <Text style={styles.appBarTitle}>Offline AI</Text>
+          <Text style={styles.appBarTitle}>{homeCopy.appBarTitle}</Text>
           <View style={styles.appBarActions}>
             <TouchableOpacity activeOpacity={0.8}>
               <Ionicons name="school-outline" size={20} color={OnboardingPalette.textPrimary} />
@@ -189,13 +196,13 @@ export default function HomeScreen() {
 
         <View style={styles.heroCard}>
           <View>
-            <Text style={styles.heroGreeting}>Hello, {profileName}!</Text>
+            <Text style={styles.heroGreeting}>{homeCopy.heroGreeting(profileName)}</Text>
             <Text style={styles.heroSubtext}>{greetSubtitle}</Text>
           </View>
           <View style={styles.heroStatusRow}>
             <View style={styles.statusPill}>
               <Ionicons name="school-outline" size={14} color={OnboardingPalette.accent} />
-              <Text style={styles.statusLabel}>{classLabel ?? 'Standard not set'}</Text>
+              <Text style={styles.statusLabel}>{effectiveClassLabel}</Text>
             </View>
           </View>
         </View>
@@ -215,10 +222,10 @@ export default function HomeScreen() {
         </View>
 
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Selected Subjects</Text>
+          <Text style={styles.sectionTitle}>{homeCopy.selectedSubjects}</Text>
         </View>
         <View style={styles.activityGrid}>
-          {selectedSubjects.length === 0 && <Text style={styles.activityMeta}>No subjects yet. Add one!</Text>}
+          {selectedSubjects.length === 0 && <Text style={styles.activityMeta}>{homeCopy.noSubjectsLabel}</Text>}
           {selectedSubjects.map((item) => (
             <TouchableOpacity
               key={item.id}
@@ -238,7 +245,7 @@ export default function HomeScreen() {
 
         <TouchableOpacity style={styles.addSubjectButton} activeOpacity={0.9}>
           <Ionicons name="add-outline" size={20} color={OnboardingPalette.background} />
-          <Text style={styles.addSubjectLabel}>Add Subject</Text>
+          <Text style={styles.addSubjectLabel}>{homeCopy.addSubject}</Text>
         </TouchableOpacity>
       </ScrollView>
 

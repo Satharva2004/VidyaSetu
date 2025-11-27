@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "VidyaSetu",
-    "slug": "VidyaSetu",
+    "slug": "vidya",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -44,6 +44,13 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "faa4230d-f440-4c0a-bee0-dbdf0acd2b79"
+      }
+    },
+    "owner": "swaraj_darekar"
   }
 }
